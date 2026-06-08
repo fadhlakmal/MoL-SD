@@ -1,5 +1,7 @@
 import torch
 
+from sd.utils.utils import load_expanded_unet
+
 if not hasattr(torch, "float8_e8m0fnu"):
     setattr(torch, "float8_e8m0fnu", torch.float32)
 
@@ -11,7 +13,7 @@ from sd.models.unet.unet_2d import UNet2DConditionModel
 from sd.models.autoencoder.encoder import Encoder
 from sd.models.autoencoder.decoder import Decoder
 from sd.models.autoencoder.vae import VAE
-from sd.utils.weight_mapping import map_encoder_keys, map_decoder_keys
+from sd.utils.weight_mapping import map_encoder_keys, map_decoder_keys, map_unet_keys
 from sd.models.text_encoder.clip import CLIPEncoder
 from sd.schedulers.ddim import DDIMScheduler
 from sd.utils.logger import WandbLogger
@@ -28,10 +30,13 @@ def train():
     scheduler = DDIMScheduler(num_train_timesteps=1000)
 
     # model
-    unet = UNet2DConditionModel().to(device)
+    state_dict = load_file("v1-5-pruned-emaonly.safetensors")
+    unet = UNet2DConditionModel(in_channels=4).to(device)
+    mapped_unet_dict = map_unet_keys(state_dict) 
+    unet = load_expanded_unet(unet, mapped_unet_dict, device)
     unet.train()
 
-    state_dict = load_file("v1-5-pruned-emaonly.safetensors")
+    
     encoder = Encoder()
     encoder.load_state_dict(map_encoder_keys(state_dict), strict=True)
     decoder = Decoder()
