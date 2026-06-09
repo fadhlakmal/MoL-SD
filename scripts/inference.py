@@ -8,7 +8,8 @@ from sd.models.unet.unet_2d import UNet2DConditionModel
 from sd.models.autoencoder.decoder import Decoder
 from sd.models.autoencoder.vae import VAEDecoder
 from sd.models.text_encoder.clip import CLIPEncoder
-from sd.schedulers.ddim import DDIMScheduler
+# from sd.schedulers.ddim import DDIMScheduler
+from sd.schedulers.euler import EulerDiscreteScheduler
 from sd.pipeline.sd_pipeline import StableDiffusionPipeline
 from sd.utils.weight_mapping import map_unet_keys, map_decoder_keys
 
@@ -41,8 +42,9 @@ def main():
     clip = CLIPEncoder(model_name="openai/clip-vit-large-patch14")
     clip.to(device)
 
-    print("Initializing DDIM Scheduler...")
-    scheduler = DDIMScheduler(num_train_timesteps=1000)
+    print("Initializing Scheduler...")
+    # scheduler = DDIMScheduler(num_train_timesteps=1000)
+    scheduler = EulerDiscreteScheduler(num_train_timesteps=1000)
 
     print("Assembling Pipeline...")
     pipeline = StableDiffusionPipeline(
@@ -62,7 +64,7 @@ def main():
         negative_prompt=negative_prompt,
         height=512,
         width=512,
-        num_inference_steps=50,
+        num_inference_steps=30,
         cfg_scale=7.5,
         seed=42,
         device=device

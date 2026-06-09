@@ -16,7 +16,7 @@ chmod +x setup.sh
 ./setup.sh
 ```
 
-## Pproject Structure
+## Project Structure
 
 ```
 mol-sd
@@ -38,11 +38,16 @@ mol-sd
     │   └── 📁 unet/
     │       ├── unet_2d.py       # The core denoising architecture
     │       └── attention.py     # Self/Cross attention blocks
+    ├── 📁 ops/
     ├── 📁 pipeline/
     │   └── sd_pipeline.py       # End-to-end generation loop
+    ├── 📁 schedulers/
+    |   ├── ddim.py              # DDIM Scheduler
+    |   └── euler.py             # Euler Scheduler (for inference)
     └── 📁 utils/
         ├── checkpoint.py        # Saving/Resuming training states
         ├── logger.py            # Weights & Biases (Wandb) telemetry
+        ├── utils.py             # Weights & Biases (Wandb) telemetry
         └── weight_mapping.py    # Safetensor weight translation dictionaries
 ```
 

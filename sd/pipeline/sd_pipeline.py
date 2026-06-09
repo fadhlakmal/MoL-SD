@@ -51,7 +51,9 @@ class StableDiffusionPipeline:
         else:
             generator.seed()
             
-        latents = torch.randn(shape, generator=generator, device=device)        
+        latents = torch.randn(shape, generator=generator, device=device)
+        if hasattr(self.scheduler, "init_noise_sigma"):
+            latents = latents * self.scheduler.init_noise_sigma        
         self.scheduler.set_timesteps(num_inference_steps, device)
 
         # diffusion loop (denoising)
@@ -62,6 +64,9 @@ class StableDiffusionPipeline:
                 # Concat along channel dim: (2, 4, H, W) + (2, 4, H, W) -> (2, 8, H, W)
                 latent_model_input = torch.cat([latent_model_input, cond_latents], dim=1)
             
+            if hasattr(self.scheduler, "scale_model_input"):
+                latent_model_input = self.scheduler.scale_model_input(latent_model_input, t)
+
             noise_pred = self.unet(latent_model_input, t, context)
             noise_pred_uncond, noise_pred_text = noise_pred.chunk(2)
             
