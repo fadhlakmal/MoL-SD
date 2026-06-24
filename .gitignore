@@ -10,6 +10,9 @@ wheels/
 .venv
 
 .env
-checkpoints/
+checkpoints*/
 *.safetensors
 wandb/
+
+data*/
+results/

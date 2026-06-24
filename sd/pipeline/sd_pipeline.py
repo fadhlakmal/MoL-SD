@@ -81,8 +81,9 @@ class StableDiffusionPipeline:
         
         # PT Tensor (-1 to 1) -> PIL Img (0 to 255 RGB)
         image = (image / 2 + 0.5).clamp(0, 1) 
-        image = image.cpu().permute(0, 2, 3, 1).numpy() 
-        
+        # image = image.cpu().permute(0, 2, 3, 1).numpy() 
+        image = image.to(torch.float32).cpu().permute(0, 2, 3, 1).numpy()
+                
         image = (image * 255).round().astype(np.uint8)
         pil_image = Image.fromarray(image[0])
         

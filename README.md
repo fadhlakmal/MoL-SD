@@ -1,69 +1,57 @@
 # MoL-SD (Multi-Objective Learning Stable Diffusion)
 
-Hi Mom
+Official repository for evaluating Early-Fusion 8-Channel U-Net Architecture on Stable Diffusion for Multi-Objective Conditioning (Canny Edge & Depth Map).
 
-## Prerequisites
-* Ubuntu / WSL2
-* NVIDIA GPU with at least 8GB VRAM (CUDA toolkit installed)
-* Weights & Biases (Wandb) account for training telemetry
+## System Requirements
+Due to the 8-channel U-Net modifications and early-fusion concatenation, this pipeline requires strict memory management:
+* OS: Ubuntu 22.04/24.04 or Windows WSL2
+* GPU: NVIDIA GPU with at least **16GB VRAM** (Developed & tested on RTX 4080 Super)
+* RAM: 32GB - 64GB System RAM
+* Storage: NVMe SSD recommended (Base weights + 5 Checkpoints require ~20GB)
+* Telemetry: Weights & Biases (WandB) account for training logging
 
-## Installation
+## Installation & Setup
 
-Run the automated Ubuntu setup script. This will install the `uv` package manager, configure the virtual environment, install PyTorch, and download the base weights.
+1. Run the automated setup script to install the `uv` package manager, configure the virtual environment, install PyTorch (bfloat16 enabled), and download the v1.5 base weights.
+   chmod +x setup.sh
+   ./setup.sh
 
-```bash
-chmod +x setup.sh
-./setup.sh
-```
+2. Authenticate your wandb account for training telemetry:
+   wandb login
 
-## Project Structure
+## 📂 Project Structure
 
-```
-mol-sd
+mol-sd/
 ├── README.md
 ├── setup.sh
-├── 📁 scripts/
-│   ├── inference.py             # Text-to-Image execution script
-│   └── train.py                 # U-Net fine-tuning loop
-└── 📁 sd/
-    ├── 📁 data/
-    │   └── dataset.py           # ImageTextDataset and transforms
-    ├── 📁 models/
-    │   ├── 📁 autoencoder/
-    │   │   ├── encoder.py       # Image to Latent compression
-    │   │   ├── decoder.py       # Latent to Image generation
-    │   │   └── vae.py           # VAEDecoder (inference) & VAE (training) wrappers
-    │   ├── 📁 text_encoder/
-    │   │   └── clip.py          # Frozen CLIP text embeddings
-    │   └── 📁 unet/
-    │       ├── unet_2d.py       # The core denoising architecture
-    │       └── attention.py     # Self/Cross attention blocks
-    ├── 📁 ops/
-    ├── 📁 pipeline/
-    │   └── sd_pipeline.py       # End-to-end generation loop
-    ├── 📁 schedulers/
-    |   ├── ddim.py              # DDIM Scheduler
-    |   └── euler.py             # Euler Scheduler (for inference)
-    └── 📁 utils/
-        ├── checkpoint.py        # Saving/Resuming training states
-        ├── logger.py            # Weights & Biases (Wandb) telemetry
-        ├── utils.py             # Weights & Biases (Wandb) telemetry
-        └── weight_mapping.py    # Safetensor weight translation dictionaries
-```
+├── 📁 data_test/                # 50 isolated MS COCO images for evaluation
+├── 📁 data/                     # 500 isolated MS COCO images for training
+├── 📁 results/                  # Generated images, CSV reports, and graphs
+├── 📁 sd/                       # Core Stable Diffusion Architecture
+│   ├── 📁 data/                 # MS COCO streaming ImageTextDataset
+│   ├── 📁 models/               # Autoencoder, CLIP, and U-Net (2D & Attention)
+│   ├── 📁 pipeline/             # SD generation pipeline
+│   ├── 📁 schedulers/           # DDIM and Euler Discrete schedulers
+│   └── 📁 utils/                # Weight mapping, bfloat16 casting, and WandB config
+├── get_data.py                   # Get & Preprocess 500 MS COCO Data for Training  
+└── get_test_data.py              # Get & Preprocess 50 MS COCO Data for Testing  
 
-## Usage: Inference
+## Usage 1: Training the Models
+The training loop utilizes Hugging Face's dataset streaming to save disk space. It applies memory-aggressive optimizations including `torch.bfloat16` and `AdamW8bit`.
 
-To test the `VAEDecoder` and generate an image from pure noise, run the inference script. This strictly loads the components needed for generation to save VRAM.
+To execute the training loop:
+   uv run python -m scripts.train
 
-    uv run python -m scripts.inference
+Note: You can monitor step-by-step image reconstruction, Canny/Depth loss, and peak VRAM allocation live on your WandB dashboard.
 
-Outputs to: `test.png`
+## Usage 2: Batch Inference
+To reproduce the architecture study and generate the 500 test images using Classifier-Free Guidance (CFG = 1.0) and 20 inference steps:
 
-## Usage: Training
+   uv run python -m scripts.batch_inference
 
-1. Place a target image inside any folder.
-2. In it, add `metadata.json` with the corresponding text prompt.
-3. Authenticate with Weights & Biases: `wandb login`
-4. Execute the training loop: `uv run python -m scripts.train`
+This will create nested folders inside `results/` containing outputs from both Euler and DDIM schedulers. It also outputs `inference_speed_report.csv`.
 
-You can monitor the step-by-step image reconstruction and Mean Squared Error (MSE) loss dropping live on your Wandb dashboard. Weights will be saved automatically to `/checkpoints/`.
+## Usage 3: Evaluation & Visualization
+Once batch inference is complete, you can calculate the Fréchet Inception Distance (FID) and Structural Similarity Index (SSIM):
+
+   uv run python -m scripts.eval

@@ -21,17 +21,17 @@ from sd.utils.logger import WandbLogger
 from sd.utils.checkpoint import CheckpointManager
 from sd.pipeline.sd_pipeline import StableDiffusionPipeline
 from sd.data.dataset import ConditionalImageDataset
-from sd.utils.utils import load_expanded_unet
 
 def train():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    logger = WandbLogger(project_name="mol-sd-finetune", run_name="sd-baseline-run-01")
-    checkpointer = CheckpointManager(save_dir="checkpoints_baseline")
+    logger = WandbLogger(project_name="mol-sd-finetune", run_name="sd-standard-baseline-run")
+    checkpointer = CheckpointManager(save_dir="checkpoints_standard_baseline")
     scheduler = DDIMScheduler(num_train_timesteps=1000)
 
     state_dict = load_file("v1-5-pruned-emaonly.safetensors")
-    unet = UNet2DConditionModel(in_channels=8)
+    
+    unet = UNet2DConditionModel(in_channels=4)
 
     encoder_dict = map_encoder_keys(state_dict)
     decoder_dict = map_decoder_keys(state_dict)
@@ -65,8 +65,8 @@ def train():
         else:
             mapped_unet_dict[k] = v
 
-    unet = load_expanded_unet(unet, mapped_unet_dict, device)
-    
+    unet.load_state_dict(mapped_unet_dict)
+    unet = unet.to(device)
     unet.train()
 
     pipeline = StableDiffusionPipeline(vae, clip, unet, scheduler)
@@ -76,7 +76,6 @@ def train():
 
     val_sample = train_dataset[425]
     val_prompt = val_sample["text"]
-    val_condition = val_sample["condition"].unsqueeze(0).to(device)
 
     learning_rate = 1e-5
     optimizer = bnb.optim.AdamW8bit(unet.parameters(), lr=learning_rate, weight_decay=1e-2)
@@ -85,19 +84,17 @@ def train():
     save_every_n_steps = 1000
     global_step = 0
 
-    print("Starting Baseline Training Loop...")
+    print("Starting Standard 4-Channel Baseline Training Loop...")
     for epoch in range(num_epochs):
         progress_bar = tqdm(train_dataloader, desc=f"Epoch {epoch+1}/{num_epochs}")
         for batch in progress_bar:
             optimizer.zero_grad()
 
             targets = batch["target"].to(device)
-            conditions = batch["condition"].to(device)
             encoder_hidden_states = batch["text"]
 
             with torch.no_grad():
                 latents = vae.encode(targets) * 0.18215
-                condition_latents = vae.encode(conditions) * 0.18215
                 encoder_hidden_states = clip(encoder_hidden_states, device)
 
             noise = torch.randn_like(latents)
@@ -106,7 +103,7 @@ def train():
 
             noisy_latents = scheduler.add_noise(latents, noise, timesteps)
 
-            unet_input = torch.cat([noisy_latents, condition_latents], dim=1)
+            unet_input = noisy_latents
             unet_input.requires_grad_(True)
 
             with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
@@ -133,7 +130,6 @@ def train():
                 with torch.no_grad():
                     image = pipeline.generate(
                         prompt=val_prompt,
-                        condition_image=val_condition,
                         negative_prompt="blurry, distorted, low quality, bad composition",
                         height=512, 
                         width=512,
@@ -141,7 +137,7 @@ def train():
                         cfg_scale=7.5,
                         device=device
                     )
-                    logger.log_image(image, prompt=f"Baseline Step {global_step} | {val_prompt}", step=global_step)
+                    logger.log_image(image, prompt=f"Standard Baseline Step {global_step} | {val_prompt}", step=global_step)
                 unet.train()
 
             global_step += 1
@@ -150,4 +146,3 @@ def train():
 
 if __name__ == "__main__":
     train()
-    #pass

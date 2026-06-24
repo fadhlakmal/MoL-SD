@@ -10,6 +10,7 @@ class EulerDiscreteScheduler:
         alphas_cumprod = torch.cumprod(alphas, dim=0)
         
         self.sigmas = ((1 - alphas_cumprod) / alphas_cumprod) ** 0.5
+        self.train_sigmas = self.sigmas.clone()
         
         self.init_noise_sigma = self.sigmas.max()
         self.timesteps = None
@@ -18,8 +19,9 @@ class EulerDiscreteScheduler:
         timesteps = np.linspace(0, self.num_train_timesteps - 1, num_inference_steps, dtype=np.float32)[::-1].copy()
         self.timesteps = torch.from_numpy(timesteps).to(device)
         
-        sigmas = np.interp(timesteps, np.arange(0, len(self.sigmas)), self.sigmas.numpy())
-        sigmas = np.append(sigmas, 0.0) # The final target sigma is always 0 (pure image)
+        # sigmas = np.interp(timesteps, np.arange(0, len(self.sigmas)), self.sigmas.numpy())
+        sigmas = np.interp(timesteps, np.arange(0, len(self.train_sigmas)), self.train_sigmas.cpu().numpy())
+        sigmas = np.append(sigmas, 0.0) 
         self.sigmas = torch.from_numpy(sigmas).to(device)
 
     def scale_model_input(self, sample: torch.Tensor, timestep: int) -> torch.Tensor:

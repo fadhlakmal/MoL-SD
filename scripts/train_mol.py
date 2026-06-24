@@ -1,8 +1,8 @@
 import torch
-
+import bitsandbytes as bnb
 if not hasattr(torch, "float8_e8m0fnu"):
     setattr(torch, "float8_e8m0fnu", torch.float32)
-
+import os
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
 from tqdm import tqdm
@@ -25,8 +25,8 @@ from sd.utils.utils import load_expanded_unet
 def train():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    logger = WandbLogger(project_name="mol-sd-finetune", run_name="mol-phase2-test")
-    checkpointer = CheckpointManager(save_dir="checkpoints")
+    logger = WandbLogger(project_name="mol-sd-finetune", run_name="mol-early-fusion-20-80")
+    checkpointer = CheckpointManager(save_dir="checkpoints_20_80")
     scheduler = DDIMScheduler(num_train_timesteps=1000)
     
     state_dict = load_file("v1-5-pruned-emaonly.safetensors")
@@ -62,7 +62,12 @@ def train():
         scheduler=scheduler
     )
 
-    optimizer = torch.optim.AdamW(unet.parameters(), lr=1e-5, weight_decay=1e-2)
+    # optimizer = torch.optim.AdamW(unet.parameters(), lr=1e-5, weight_decay=1e-2)
+    optimizer = bnb.optim.AdamW8bit(
+        unet.parameters(), 
+        lr=1e-5, 
+        weight_decay=1e-2
+    )
 
     ds_canny = ConditionalImageDataset("data/canny/targets", "data/canny/conditions", "data/prompts.txt", size=512)
     ds_depth = ConditionalImageDataset("data/depth/targets", "data/depth/conditions", "data/prompts.txt", size=512)
@@ -70,10 +75,27 @@ def train():
     dl_canny = DataLoader(ds_canny, batch_size=1, shuffle=True)
     dl_depth = DataLoader(ds_depth, batch_size=1, shuffle=True)
 
-    num_epochs = 100
+    val_sample_canny = ds_canny[425]
+    val_cond_canny = val_sample_canny["condition"].unsqueeze(0).to(device)
+    val_prompt_canny = val_sample_canny["text"]
+
+    val_sample_depth = ds_depth[425]
+    val_cond_depth = val_sample_depth["condition"].unsqueeze(0).to(device)
+    val_prompt_depth = val_sample_depth["text"]
+
+    num_epochs = 20
     global_step = 0
-    save_every_n_steps = 50
+    save_every_n_steps = 1000
+
+    resume_path = "checkpoints/unet_step_xxxx.pt"
+    start_epoch = 0
+    global_step = 0
     
+    if os.path.exists(resume_path):
+        print(f"Resuming training from {resume_path}...")
+        global_step = checkpointer.load(resume_path, unet, optimizer) 
+        start_epoch = global_step // len(dl_canny)
+
     val_batch = next(iter(dl_canny))
     val_condition = val_batch["condition"].to(device)
     val_prompt = val_batch["text"][0]
@@ -96,25 +118,29 @@ def train():
         
         unet_input = torch.cat([noisy_latents, condition_latents], dim=1)
         
-        noise_pred = unet(unet_input, timesteps, encoder_hidden_states)
-        return F.mse_loss(noise_pred, noise)
+        # noise_pred = unet(unet_input, timesteps, encoder_hidden_states)
+        # return F.mse_loss(noise_pred, noise)
+        with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
+            noise_pred = unet(unet_input, timesteps, encoder_hidden_states)
+            loss = F.mse_loss(noise_pred, noise)
+        return loss
 
-    for epoch in range(num_epochs):
+    for epoch in range(start_epoch, num_epochs):
         progress_bar = tqdm(zip(dl_canny, dl_depth), total=min(len(dl_canny), len(dl_depth)), desc=f"Epoch {epoch+1}")
 
         for batch_canny, batch_depth in progress_bar:
             optimizer.zero_grad()
 
             loss_canny = compute_objective_loss(batch_canny)
-            (0.5 * loss_canny).backward() 
+            (0.2 * loss_canny).backward() 
             
             loss_depth = compute_objective_loss(batch_depth)
-            (0.5 * loss_depth).backward()
+            (0.8 * loss_depth).backward()
 
             torch.nn.utils.clip_grad_norm_(unet.parameters(), max_norm=1.0)
             optimizer.step()
 
-            total_loss = (0.5 * loss_canny.item()) + (0.5 * loss_depth.item())
+            total_loss = (0.2 * loss_canny.item()) + (0.8 * loss_depth.item())
 
             logger.log_metrics({
                 "loss_canny": loss_canny.item(), 
@@ -132,17 +158,27 @@ def train():
                 checkpointer.save(unet, optimizer, global_step, total_loss)
                 unet.eval()
                 with torch.no_grad():
-                    image = pipeline.generate(
-                        prompt=val_prompt,
-                        condition_image=val_condition,
+                    image_c = pipeline.generate(
+                        prompt=val_prompt_canny,
+                        condition_image=val_cond_canny,
                         negative_prompt="blurry, distorted, low quality",
-                        height=512, 
-                        width=512,
-                        num_inference_steps=20, 
-                        cfg_scale=7.5,
-                        device=device
-                    )
-                    logger.log_image(image, prompt=f"Step {global_step} | {val_prompt}", step=global_step)                
+                        height=512, width=512,
+                        num_inference_steps=20, cfg_scale=7.5, device=device
+                    )                    
+                    image_d = pipeline.generate(
+                        prompt=val_prompt_depth,
+                        condition_image=val_cond_depth,
+                        negative_prompt="blurry, distorted, low quality",
+                        height=512, width=512,
+                        num_inference_steps=20, cfg_scale=7.5, device=device
+                    )                    
+                    from PIL import Image
+                    combined_image = Image.new('RGB', (1024, 512))
+                    combined_image.paste(image_c, (0, 0))
+                    combined_image.paste(image_d, (512, 0))
+                    
+                    caption = f"Step {global_step} | Left: Canny ({val_prompt_canny}) | Right: Depth ({val_prompt_depth})"
+                    logger.log_image(combined_image, prompt=caption, step=global_step)               
                 unet.train()
 
             global_step += 1
