@@ -1,0 +1,18 @@
+experiment_name: "tes-default"
+checkpoint_dir: "checkpoints"
+
+data:
+  size: 512
+  batch_size: 1
+  prompts_file: "data/prompts.txt"
+  tasks:
+    conditional_task:
+      weight: 1.0
+      target_dir: "data/canny/targets"
+      cond_dir: "data/canny/conditions"
+
+training:
+  num_epochs: 1
+  learning_rate: 1.0e-5
+  weight_decay: 1.0e-2
+  save_every_n_steps: 0

@@ -95,7 +95,7 @@ class Trainer:
                 self.logger.log_metrics(metrics, step=self.global_step)
                 progress_bar.set_postfix(**{k: f"{v:.4f}" for k, v in metrics.items() if "loss" in k})
 
-                if self.global_step > 0 and self.global_step % self.save_every_n_steps == 0:
+                if self.save_every_n_steps > 0 and self.global_step > 0 and self.global_step % self.save_every_n_steps == 0:
                     self.save_and_evaluate()
 
                 self.global_step += 1
