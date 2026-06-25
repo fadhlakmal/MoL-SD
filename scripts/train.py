@@ -1,10 +1,9 @@
 import os
+import argparse
 import torch
-import torch.nn.functional as F
-import torch.utils.checkpoint as checkpoint
 import bitsandbytes as bnb
+from omegaconf import OmegaConf
 from torch.utils.data import DataLoader
-from tqdm import tqdm
 from safetensors.torch import load_file
 
 if not hasattr(torch, "float8_e8m0fnu"):
@@ -14,34 +13,45 @@ from sd.models.unet.unet_2d import UNet2DConditionModel
 from sd.models.autoencoder.encoder import Encoder
 from sd.models.autoencoder.decoder import Decoder
 from sd.models.autoencoder.vae import VAE
-from sd.utils.weight_mapping import map_encoder_keys, map_decoder_keys, map_unet_keys
 from sd.models.text_encoder.clip import CLIPEncoder
 from sd.schedulers.ddim import DDIMScheduler
-from sd.utils.logger import WandbLogger
-from sd.utils.checkpoint import CheckpointManager
-from sd.pipeline.sd_pipeline import StableDiffusionPipeline
 from sd.data.dataset import ConditionalImageDataset
-from sd.utils.utils import load_expanded_unet
+from sd.utils.weight_mapping import map_encoder_keys, map_decoder_keys, map_unet_keys
+from sd.utils.core import load_expanded_unet
+from sd.engine.trainer import Trainer
 
-def train():
+def set_seed(seed):
+    """Crucial for academic reproducibility!"""
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+    # import numpy as np; np.random.seed(seed)
+    # import random; random.seed(seed)
+
+def main():
+    parser = argparse.ArgumentParser(description="Train Stable Diffusion")
+    parser.add_argument("--config", type=str, required=True, help="Path to the config yaml")
+    args = parser.parse_args()
+
+    config = OmegaConf.load(args.config)
+    
+    if hasattr(config, "seed"):
+        set_seed(config.seed)
+
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
-    logger = WandbLogger(project_name="mol-sd-finetune", run_name="sd-baseline-run-01")
-    checkpointer = CheckpointManager(save_dir="checkpoints_baseline")
-    scheduler = DDIMScheduler(num_train_timesteps=1000)
+    print(f"Initializing {config.experiment_name} on {device}...")
 
     state_dict = load_file("v1-5-pruned-emaonly.safetensors")
-    unet = UNet2DConditionModel(in_channels=8)
 
-    encoder_dict = map_encoder_keys(state_dict)
-    decoder_dict = map_decoder_keys(state_dict)
-    unet_dict = map_unet_keys(state_dict)
+    unet = UNet2DConditionModel(in_channels=8).to(device)
+    mapped_unet_dict = map_unet_keys(state_dict)
+    unet = load_expanded_unet(unet, mapped_unet_dict, device)
+    unet.train()
 
     encoder = Encoder()
+    encoder.load_state_dict(map_encoder_keys(state_dict), strict=True)
     decoder = Decoder()
-    encoder.load_state_dict(encoder_dict)
-    decoder.load_state_dict(decoder_dict)
-
+    decoder.load_state_dict(map_decoder_keys(state_dict), strict=True)
+    
     quant_conv = torch.nn.Conv2d(8, 8, kernel_size=1)
     quant_conv.weight.data = state_dict["first_stage_model.quant_conv.weight"].clone()
     quant_conv.bias.data = state_dict["first_stage_model.quant_conv.bias"].clone()
@@ -51,103 +61,46 @@ def train():
 
     vae = VAE(encoder, decoder, quant_conv, post_quant_conv).to(device)
     vae.eval()
-
-    clip = CLIPEncoder().to(device)
-    clip.eval()
-
     for param in vae.parameters(): param.requires_grad = False
+
+    clip = CLIPEncoder(model_name="openai/clip-vit-large-patch14").to(device)
+    clip.eval()
     for param in clip.parameters(): param.requires_grad = False
 
-    mapped_unet_dict = {}
-    for k, v in unet.state_dict().items():
-        if k in unet_dict:
-            mapped_unet_dict[k] = unet_dict[k]
-        else:
-            mapped_unet_dict[k] = v
+    scheduler = DDIMScheduler(num_train_timesteps=1000)
+    optimizer = bnb.optim.AdamW8bit(
+        unet.parameters(), 
+        lr=config.training.learning_rate, 
+        weight_decay=config.training.weight_decay
+    )
 
-    unet = load_expanded_unet(unet, mapped_unet_dict, device)
+    dataloaders = {}
+    for task_name, task_cfg in config.data.tasks.items():
+        print(f"Loading dataset for task: {task_name}")
+        dataset = ConditionalImageDataset(
+            target_dir=task_cfg.target_dir, 
+            condition_dir=task_cfg.cond_dir, 
+            prompts_file=config.data.prompts_file, 
+            size=config.data.size
+        )
+        dataloaders[task_name] = DataLoader(
+            dataset, 
+            batch_size=config.data.batch_size, 
+            shuffle=True
+        )
+
+    trainer = Trainer(
+        config=config,
+        unet=unet,
+        vae=vae,
+        clip=clip,
+        scheduler=scheduler,
+        dataloaders=dataloaders,
+        optimizer=optimizer,
+        device=device
+    )
     
-    unet.train()
-
-    pipeline = StableDiffusionPipeline(vae, clip, unet, scheduler)
-
-    train_dataset = ConditionalImageDataset("data/canny/targets", "data/canny/conditions", "data/prompts.txt", size=512)
-    train_dataloader = DataLoader(train_dataset, batch_size=1, shuffle=True)
-
-    val_sample = train_dataset[425]
-    val_prompt = val_sample["text"]
-    val_condition = val_sample["condition"].unsqueeze(0).to(device)
-
-    learning_rate = 1e-5
-    optimizer = bnb.optim.AdamW8bit(unet.parameters(), lr=learning_rate, weight_decay=1e-2)
-
-    num_epochs = 20
-    save_every_n_steps = 1000
-    global_step = 0
-
-    print("Starting Baseline Training Loop...")
-    for epoch in range(num_epochs):
-        progress_bar = tqdm(train_dataloader, desc=f"Epoch {epoch+1}/{num_epochs}")
-        for batch in progress_bar:
-            optimizer.zero_grad()
-
-            targets = batch["target"].to(device)
-            conditions = batch["condition"].to(device)
-            encoder_hidden_states = batch["text"]
-
-            with torch.no_grad():
-                latents = vae.encode(targets) * 0.18215
-                condition_latents = vae.encode(conditions) * 0.18215
-                encoder_hidden_states = clip(encoder_hidden_states, device)
-
-            noise = torch.randn_like(latents)
-            bsz = latents.shape[0]
-            timesteps = torch.randint(0, scheduler.num_train_timesteps, (bsz,), device=device).long()
-
-            noisy_latents = scheduler.add_noise(latents, noise, timesteps)
-
-            unet_input = torch.cat([noisy_latents, condition_latents], dim=1)
-            unet_input.requires_grad_(True)
-
-            with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
-                noise_pred = checkpoint.checkpoint(
-                    unet,
-                    unet_input,
-                    timesteps,
-                    encoder_hidden_states,
-                    use_reentrant=False
-                )
-                loss = F.mse_loss(noise_pred, noise)
-
-            loss.backward()
-            torch.nn.utils.clip_grad_norm_(unet.parameters(), max_norm=1.0)
-            optimizer.step()
-
-            logger.log_metrics({"train_loss": loss.item(), "lr": learning_rate}, step=global_step)
-            progress_bar.set_postfix(loss=loss.item())
-
-            if global_step > 0 and global_step % save_every_n_steps == 0:
-                checkpointer.save(unet, optimizer, global_step, loss.item())
-                
-                unet.eval()
-                with torch.no_grad():
-                    image = pipeline.generate(
-                        prompt=val_prompt,
-                        condition_image=val_condition,
-                        negative_prompt="blurry, distorted, low quality, bad composition",
-                        height=512, 
-                        width=512,
-                        num_inference_steps=20, 
-                        cfg_scale=7.5,
-                        device=device
-                    )
-                    logger.log_image(image, prompt=f"Baseline Step {global_step} | {val_prompt}", step=global_step)
-                unet.train()
-
-            global_step += 1
-            
-    logger.finish()
+    trainer.train()
 
 if __name__ == "__main__":
-    train()
-    #pass
+    main()

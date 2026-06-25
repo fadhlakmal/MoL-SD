@@ -1,7 +1,6 @@
-uv run python -m scripts.inference \
-  --prompt "A person on a motor bike on a street." \
-  --ckpt "checkpoints_50_50/unet_step_9000.pt" \
-  --channels 8 \
-  --condition "data/depth/conditions/441.png" \
-  --scheduler DDIM \
-  --output "out_depth.png"
+python scripts/inference.py \
+    --prompt "a futuristic sports car on a neon-lit street" \
+    --condition_image data_test/canny/conditions/0.png \
+    --checkpoint checkpoints/unet_step_10000.pt \
+    --output results/tes.png \
+    --seed 123
