@@ -1,106 +1,78 @@
-import os
+"""Train a (multi-task) conditional diffusion model.
+
+    uv run python -m scripts.train --config configs/default.yaml [dot.list=overrides ...]
+"""
+
 import argparse
+import os
+
 import torch
-import bitsandbytes as bnb
 from omegaconf import OmegaConf
-from torch.utils.data import DataLoader
-from safetensors.torch import load_file
 
-if not hasattr(torch, "float8_e8m0fnu"):
-    setattr(torch, "float8_e8m0fnu", torch.float32)
-
-from sd.models.unet.unet_2d import UNet2DConditionModel
-from sd.models.autoencoder.encoder import Encoder
-from sd.models.autoencoder.decoder import Decoder
-from sd.models.autoencoder.vae import VAE
-from sd.models.text_encoder.clip import CLIPEncoder
-from sd.schedulers.ddim import DDIMScheduler
+from sd.config import load_config
 from sd.data.dataset import ConditionalImageDataset
-from sd.utils.weight_mapping import map_encoder_keys, map_decoder_keys, map_unet_keys
-from sd.utils.core import load_expanded_unet
-from sd.engine.trainer import Trainer
+from sd.data.multitask import MultiTaskLoader
+from sd.engine.trainer import Trainer, collate_val_batches
+from sd.models.loader import build_clip, build_unet, build_vae
+from sd.objectives import build_objective
+from sd.utils.logger import Logger
+from sd.utils.seed import set_seed
 
-def set_seed(seed):
-    """Crucial for academic reproducibility!"""
-    torch.manual_seed(seed)
-    torch.cuda.manual_seed_all(seed)
-    # import numpy as np; np.random.seed(seed)
-    # import random; random.seed(seed)
+
+def build_datasets(cfg) -> dict[str, ConditionalImageDataset]:
+    if not cfg.data.tasks:
+        raise ValueError("config must define at least one task under data.tasks")
+    datasets = {}
+    for name, task in cfg.data.tasks.items():
+        needs_cond = cfg.model.in_channels > 4
+        if needs_cond and task.cond_dir is None:
+            raise ValueError(f"task '{name}': model.in_channels={cfg.model.in_channels} requires cond_dir")
+        datasets[name] = ConditionalImageDataset(
+            target_dir=task.target_dir,
+            condition_dir=task.cond_dir if needs_cond else None,
+            prompt_file=task.prompts_file or cfg.data.prompts_file,
+            size=cfg.data.size,
+            task=name,
+            prompt_dropout=cfg.data.prompt_dropout,
+        )
+        print(f"task {name}: {len(datasets[name])} samples, weight {task.weight}")
+    return datasets
+
 
 def main():
-    parser = argparse.ArgumentParser(description="Train Stable Diffusion")
-    parser.add_argument("--config", type=str, required=True, help="Path to the config yaml")
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("--config", required=True)
+    parser.add_argument("overrides", nargs="*", help="OmegaConf dotlist, e.g. training.max_steps=100")
     args = parser.parse_args()
 
-    config = OmegaConf.load(args.config)
-    
-    if hasattr(config, "seed"):
-        set_seed(config.seed)
-
+    cfg = load_config(args.config, args.overrides)
+    set_seed(cfg.seed)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    print(f"Initializing {config.experiment_name} on {device}...")
+    print(OmegaConf.to_yaml(cfg))
 
-    state_dict = load_file("v1-5-pruned-emaonly.safetensors")
-
-    unet = UNet2DConditionModel(in_channels=8).to(device)
-    mapped_unet_dict = map_unet_keys(state_dict)
-    unet = load_expanded_unet(unet, mapped_unet_dict, device)
-    unet.train()
-
-    encoder = Encoder()
-    encoder.load_state_dict(map_encoder_keys(state_dict), strict=True)
-    decoder = Decoder()
-    decoder.load_state_dict(map_decoder_keys(state_dict), strict=True)
-    
-    quant_conv = torch.nn.Conv2d(8, 8, kernel_size=1)
-    quant_conv.weight.data = state_dict["first_stage_model.quant_conv.weight"].clone()
-    quant_conv.bias.data = state_dict["first_stage_model.quant_conv.bias"].clone()
-    post_quant_conv = torch.nn.Conv2d(4, 4, kernel_size=1)
-    post_quant_conv.weight.data = state_dict["first_stage_model.post_quant_conv.weight"].clone()
-    post_quant_conv.bias.data = state_dict["first_stage_model.post_quant_conv.bias"].clone()
-
-    vae = VAE(encoder, decoder, quant_conv, post_quant_conv).to(device)
-    vae.eval()
-    for param in vae.parameters(): param.requires_grad = False
-
-    clip = CLIPEncoder(model_name="openai/clip-vit-large-patch14").to(device)
-    clip.eval()
-    for param in clip.parameters(): param.requires_grad = False
-
-    scheduler = DDIMScheduler(num_train_timesteps=1000)
-    optimizer = bnb.optim.AdamW8bit(
-        unet.parameters(), 
-        lr=config.training.learning_rate, 
-        weight_decay=config.training.weight_decay
-    )
-
-    dataloaders = {}
-    for task_name, task_cfg in config.data.tasks.items():
-        print(f"Loading dataset for task: {task_name}")
-        dataset = ConditionalImageDataset(
-            target_dir=task_cfg.target_dir, 
-            condition_dir=task_cfg.cond_dir, 
-            prompt_file=config.data.prompts_file, 
-            size=config.data.size
-        )
-        dataloaders[task_name] = DataLoader(
-            dataset, 
-            batch_size=config.data.batch_size, 
-            shuffle=True
-        )
+    datasets = build_datasets(cfg)
+    val_batches = collate_val_batches(datasets, cfg.training.num_val_samples)
+    data = MultiTaskLoader(datasets, cfg.data.batch_size, cfg.data.num_workers, seed=cfg.seed)
 
     trainer = Trainer(
-        config=config,
-        unet=unet,
-        vae=vae,
-        clip=clip,
-        scheduler=scheduler,
-        dataloaders=dataloaders,
-        optimizer=optimizer,
-        device=device
+        cfg=cfg,
+        unet=build_unet(cfg.model.unet_weights, cfg.model.in_channels),
+        vae=build_vae(cfg.model.vae_weights),
+        text_encoder=build_clip(cfg.model.text_encoder),
+        objective=build_objective(cfg.objective),
+        data=data,
+        val_batches=val_batches,
+        device=device,
+        logger=Logger(
+            cfg.logging.wandb,
+            cfg.logging.project,
+            cfg.experiment_name,
+            config=OmegaConf.to_container(cfg, resolve=True),
+            dir=os.path.join(cfg.output_dir, cfg.experiment_name),
+        ),
     )
-    
     trainer.train()
+
 
 if __name__ == "__main__":
     main()

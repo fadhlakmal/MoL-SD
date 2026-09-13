@@ -1,2 +1,2 @@
-uv run python -m scripts.train_ot \
+uv run python -m scripts.train \
     --config configs/mol.yaml

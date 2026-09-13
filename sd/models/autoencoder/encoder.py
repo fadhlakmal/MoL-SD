@@ -2,125 +2,100 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+
 class Downsample(nn.Module):
     def __init__(self, channels: int):
         super().__init__()
         self.conv = nn.Conv2d(channels, channels, kernel_size=3, stride=2, padding=0)
-    
+
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         x = F.pad(x, (0, 1, 0, 1), mode="constant", value=0)
         return self.conv(x)
 
-class ResnetBlock(nn.Module):
-    def __init__(self, in_channels: int, out_channels: int):
-        super().__init__()
-        self.in_channels = in_channels
-        self.out_channels = out_channels
 
-        self.norm1 = nn.GroupNorm(32, in_channels)
+class ResnetBlock(nn.Module):
+    def __init__(self, in_channels: int, out_channels: int, groups: int = 32):
+        super().__init__()
+        self.norm1 = nn.GroupNorm(groups, in_channels, eps=1e-6)
         self.conv1 = nn.Conv2d(in_channels, out_channels, kernel_size=3, stride=1, padding=1)
-        self.norm2 = nn.GroupNorm(32, out_channels)
+        self.norm2 = nn.GroupNorm(groups, out_channels, eps=1e-6)
         self.conv2 = nn.Conv2d(out_channels, out_channels, kernel_size=3, stride=1, padding=1)
-        
-        if in_channels != out_channels:
-            self.nin_shortcut = nn.Conv2d(in_channels, out_channels, kernel_size=1, stride=1, padding=0)
-        else:
-            self.nin_shortcut = nn.Identity()
+        self.conv_shortcut = nn.Conv2d(in_channels, out_channels, kernel_size=1) if in_channels != out_channels else None
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        h = x
-        h = self.norm1(h)
-        h = F.silu(h)
-        h = self.conv1(h)
-        h = self.norm2(h)
-        h = F.silu(h)
-        h = self.conv2(h)
-        return h + self.nin_shortcut(x)
+        h = self.conv1(F.silu(self.norm1(x)))
+        h = self.conv2(F.silu(self.norm2(h)))
+        shortcut = self.conv_shortcut(x) if self.conv_shortcut is not None else x
+        return h + shortcut
+
 
 class AttnBlock(nn.Module):
-    def __init__(self, channels: int):
+    """Single-head spatial self-attention (Linear projections, as in diffusers)."""
+
+    def __init__(self, channels: int, groups: int = 32):
         super().__init__()
-        self.norm = nn.GroupNorm(32, channels)
-        self.q = nn.Conv2d(channels, channels, kernel_size=1, stride=1, padding=0)
-        self.k = nn.Conv2d(channels, channels, kernel_size=1, stride=1, padding=0)
-        self.v = nn.Conv2d(channels, channels, kernel_size=1, stride=1, padding=0)
-        self.proj_out = nn.Conv2d(channels, channels, kernel_size=1, stride=1, padding=0)
-    
+        self.group_norm = nn.GroupNorm(groups, channels, eps=1e-6)
+        self.to_q = nn.Linear(channels, channels)
+        self.to_k = nn.Linear(channels, channels)
+        self.to_v = nn.Linear(channels, channels)
+        self.to_out = nn.ModuleList([nn.Linear(channels, channels), nn.Dropout(0.0)])
+
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        h_ = x
-        h_ = self.norm(h_)
-        
-        q = self.q(h_)
-        k = self.k(h_)
-        v = self.v(h_)
+        b, c, h, w = x.shape
+        hs = self.group_norm(x).reshape(b, c, h * w).transpose(1, 2)
+        q, k, v = (proj(hs)[:, None] for proj in (self.to_q, self.to_k, self.to_v))
+        out = F.scaled_dot_product_attention(q, k, v)[:, 0]
+        out = self.to_out[0](out)
+        return x + out.transpose(1, 2).reshape(b, c, h, w)
 
-        b, c, h, w = q.shape
 
-        q = q.reshape(b, c, h * w).permute(0, 2, 1) # (B, H*W, C)
-        k = k.reshape(b, c, h * w) # (B, C, H*W)
-        v = v.reshape(b, c, h * w) # (B, C, H*W)
+class MidBlock(nn.Module):
+    def __init__(self, channels: int, groups: int = 32):
+        super().__init__()
+        self.resnets = nn.ModuleList([ResnetBlock(channels, channels, groups), ResnetBlock(channels, channels, groups)])
+        self.attentions = nn.ModuleList([AttnBlock(channels, groups)])
 
-        w_ = torch.bmm(q, k) * (c ** -0.5) # (B, H*W, H*W)
-        w_ = F.softmax(w_, dim=-1)
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        x = self.resnets[0](x)
+        x = self.attentions[0](x)
+        return self.resnets[1](x)
 
-        h_ = torch.bmm(v, w_.permute(0, 2, 1)) # (B, C, H*W)
-        h_ = h_.reshape(b, c, h, w)
-        return x + self.proj_out(h_)
+
+class EncoderStage(nn.Module):
+    def __init__(self, in_ch: int, out_ch: int, num_layers: int, add_downsample: bool, groups: int):
+        super().__init__()
+        self.resnets = nn.ModuleList([ResnetBlock(in_ch if i == 0 else out_ch, out_ch, groups) for i in range(num_layers)])
+        self.downsamplers = nn.ModuleList([Downsample(out_ch)]) if add_downsample else None
+
 
 class Encoder(nn.Module):
-    def __init__(self):
-        super(Encoder, self).__init__()
-        self.conv_in = nn.Conv2d(3, 128, kernel_size=3, stride=1, padding=1)
+    def __init__(
+        self,
+        in_channels: int = 3,
+        latent_channels: int = 4,
+        block_out_channels: tuple[int, ...] = (128, 256, 512, 512),
+        layers_per_block: int = 2,
+        norm_num_groups: int = 32,
+    ):
+        super().__init__()
+        chs = block_out_channels
+        self.conv_in = nn.Conv2d(in_channels, chs[0], kernel_size=3, padding=1)
+        self.down_blocks = nn.ModuleList(
+            [
+                EncoderStage(chs[max(i - 1, 0)], ch, layers_per_block, i < len(chs) - 1, norm_num_groups)
+                for i, ch in enumerate(chs)
+            ]
+        )
+        self.mid_block = MidBlock(chs[-1], norm_num_groups)
+        self.conv_norm_out = nn.GroupNorm(norm_num_groups, chs[-1], eps=1e-6)
+        self.conv_out = nn.Conv2d(chs[-1], 2 * latent_channels, kernel_size=3, padding=1)
 
-        self.down_stage1 = nn.ModuleList([
-            ResnetBlock(128, 128),
-            ResnetBlock(128, 128),
-            Downsample(128)
-        ])
-
-        self.down_stage2 = nn.ModuleList([
-            ResnetBlock(128, 256),
-            ResnetBlock(256, 256),
-            Downsample(256)
-        ])
-
-        self.down_stage3 = nn.ModuleList([
-            ResnetBlock(256, 512),
-            ResnetBlock(512, 512),
-            Downsample(512)
-        ])
-
-        self.down_stage4 = nn.ModuleList([
-            ResnetBlock(512, 512),
-            ResnetBlock(512, 512)
-        ])
-
-        self.mid_block = nn.ModuleList([
-            ResnetBlock(512, 512),
-            AttnBlock(512),
-            ResnetBlock(512, 512)
-        ])
-
-        self.norm_out = nn.GroupNorm(32, 512)
-        self.conv_out = nn.Conv2d(512, 8, kernel_size=3, stride=1, padding=1)
-
-
-    def forward(self, x):
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
         x = self.conv_in(x)
-
-        for layer in self.down_stage1:
-            x = layer(x)
-        for layer in self.down_stage2:
-            x = layer(x)
-        for layer in self.down_stage3:
-            x = layer(x)
-        for layer in self.down_stage4:
-            x = layer(x)
-        for layer in self.mid_block:
-            x = layer(x)
-
-        x = self.norm_out(x)
-        x = F.silu(x)
-        x = self.conv_out(x)
-
-        return x
+        for stage in self.down_blocks:
+            for resnet in stage.resnets:
+                x = resnet(x)
+            if stage.downsamplers is not None:
+                x = stage.downsamplers[0](x)
+        x = self.mid_block(x)
+        return self.conv_out(F.silu(self.conv_norm_out(x)))

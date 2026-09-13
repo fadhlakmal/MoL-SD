@@ -11,8 +11,13 @@ wheels/
 
 .env
 checkpoints*/
+runs/
+weights/
 *.safetensors
 wandb/
 
 data*/
 results/
+
+/.docs
+/.claude
