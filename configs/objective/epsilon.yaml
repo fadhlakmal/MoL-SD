@@ -1,0 +1,7 @@
+# SD1.5 epsilon prediction + DDIM (baseline).
+objective:
+  type: epsilon
+
+sampling:
+  steps: 50
+  cfg_scale: 7.5

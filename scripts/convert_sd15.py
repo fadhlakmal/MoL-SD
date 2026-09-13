@@ -12,8 +12,8 @@ import os
 from diffusers import AutoencoderKL, UNet2DConditionModel
 from safetensors.torch import save_file
 
-from sd.models.autoencoder.vae import VAE
-from sd.models.unet.unet_2d import UNet2DConditionModel as OurUNet
+from molsd.models.autoencoder.vae import VAE
+from molsd.models.unet.unet_2d import UNet2DConditionModel as OurUNet
 
 HUB_REPO = "stable-diffusion-v1-5/stable-diffusion-v1-5"
 

@@ -9,12 +9,12 @@ from PIL import Image
 from torch.utils.data import default_collate
 from tqdm import tqdm
 
-from sd.data.multitask import MultiTaskLoader
-from sd.engine.ema import EMA
-from sd.objectives.base import Objective
-from sd.pipelines.conditional import ConditionalPipeline, to_pil
-from sd.utils.checkpoint import find_latest, load_checkpoint, save_checkpoint
-from sd.utils.logger import Logger
+from molsd.data.multitask import MultiTaskLoader
+from molsd.engine.ema import EMA
+from molsd.objectives.base import Objective
+from molsd.pipelines.conditional import ConditionalPipeline, to_pil
+from molsd.utils.checkpoint import find_latest, load_checkpoint, save_checkpoint
+from molsd.utils.logger import Logger
 
 NUM_T_BINS = 5
 

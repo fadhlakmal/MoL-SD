@@ -1,0 +1,6 @@
+data:
+  tasks:
+    depth:
+      weight: 1.0
+      target_dir: "data/depth/targets"
+      cond_dir: "data/depth/conditions"

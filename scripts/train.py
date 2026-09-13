@@ -9,14 +9,14 @@ import os
 import torch
 from omegaconf import OmegaConf
 
-from sd.config import load_config
-from sd.data.dataset import ConditionalImageDataset
-from sd.data.multitask import MultiTaskLoader
-from sd.engine.trainer import Trainer, collate_val_batches
-from sd.models.loader import build_clip, build_unet, build_vae
-from sd.objectives import build_objective
-from sd.utils.logger import Logger
-from sd.utils.seed import set_seed
+from molsd.config import load_config
+from molsd.data.dataset import ConditionalImageDataset
+from molsd.data.multitask import MultiTaskLoader
+from molsd.engine.trainer import Trainer, collate_val_batches
+from molsd.models.loader import build_clip, build_unet, build_vae
+from molsd.objectives import build_objective
+from molsd.utils.logger import Logger
+from molsd.utils.seed import set_seed
 
 
 def build_datasets(cfg) -> dict[str, ConditionalImageDataset]:

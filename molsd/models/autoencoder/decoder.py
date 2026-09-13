@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from sd.models.autoencoder.encoder import MidBlock, ResnetBlock
+from molsd.models.autoencoder.encoder import MidBlock, ResnetBlock
 
 
 class Upsample(nn.Module):

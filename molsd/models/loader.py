@@ -5,9 +5,9 @@ import os
 import torch
 from safetensors.torch import load_file
 
-from sd.models.autoencoder.vae import VAE
-from sd.models.text_encoder.clip import CLIPEncoder
-from sd.models.unet.unet_2d import UNet2DConditionModel, UNetConfig
+from molsd.models.autoencoder.vae import VAE
+from molsd.models.text_encoder.clip import CLIPEncoder
+from molsd.models.unet.unet_2d import UNet2DConditionModel, UNetConfig
 
 
 def _require(path: str) -> str:

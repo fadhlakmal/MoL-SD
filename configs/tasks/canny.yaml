@@ -1,0 +1,6 @@
+data:
+  tasks:
+    canny:
+      weight: 1.0
+      target_dir: "data/canny/targets"
+      cond_dir: "data/canny/conditions"

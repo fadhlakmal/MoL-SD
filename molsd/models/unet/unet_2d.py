@@ -5,8 +5,8 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.utils.checkpoint
 
-from sd.models.unet.attention import SpatialTransformer
-from sd.models.unet.blocks import Downsample2D, ResnetBlock2D, TimestepEmbedding, Upsample2D, get_timestep_embedding
+from molsd.models.unet.attention import SpatialTransformer
+from molsd.models.unet.blocks import Downsample2D, ResnetBlock2D, TimestepEmbedding, Upsample2D, get_timestep_embedding
 
 
 @dataclass

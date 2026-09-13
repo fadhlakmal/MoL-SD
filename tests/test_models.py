@@ -3,9 +3,9 @@ from diffusers import AutoencoderKL
 from diffusers import UNet2DConditionModel as DiffusersUNet
 from diffusers.models.embeddings import get_timestep_embedding as diffusers_embedding
 
-from sd.models.loader import expand_conv_in
-from sd.models.unet.blocks import get_timestep_embedding
-from sd.models.unet.unet_2d import UNet2DConditionModel
+from molsd.models.loader import expand_conv_in
+from molsd.models.unet.blocks import get_timestep_embedding
+from molsd.models.unet.unet_2d import UNet2DConditionModel
 from tests.conftest import TINY_UNET, tiny_vae
 
 

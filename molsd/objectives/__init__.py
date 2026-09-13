@@ -1,6 +1,6 @@
-from sd.objectives.base import Objective, TrainingPair
-from sd.objectives.epsilon import EpsilonObjective
-from sd.objectives.flow_matching import FlowMatchingObjective
+from molsd.objectives.base import Objective, TrainingPair
+from molsd.objectives.epsilon import EpsilonObjective
+from molsd.objectives.flow_matching import FlowMatchingObjective
 
 
 def build_objective(cfg) -> Objective:

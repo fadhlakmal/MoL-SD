@@ -2,7 +2,7 @@ from dataclasses import dataclass
 
 import torch
 
-from sd.samplers.base import Sampler
+from molsd.samplers.base import Sampler
 
 
 def expand_like(t: torch.Tensor, x: torch.Tensor) -> torch.Tensor:

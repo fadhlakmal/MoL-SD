@@ -1,6 +1,6 @@
 import torch
 
-from sd.samplers.base import Sampler
+from molsd.samplers.base import Sampler
 
 
 def shift_time(t: torch.Tensor, shift: float) -> torch.Tensor:

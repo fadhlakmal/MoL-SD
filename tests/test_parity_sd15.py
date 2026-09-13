@@ -5,7 +5,7 @@ import os
 import pytest
 import torch
 
-from sd.models.loader import build_unet, build_vae
+from molsd.models.loader import build_unet, build_vae
 
 UNET = "weights/sd15_unet.safetensors"
 VAE_W = "weights/sd15_vae.safetensors"

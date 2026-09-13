@@ -5,8 +5,8 @@ import torch
 import torch.nn as nn
 from PIL import Image
 
-from sd.models.autoencoder.vae import VAE
-from sd.models.unet.unet_2d import UNetConfig
+from molsd.models.autoencoder.vae import VAE
+from molsd.models.unet.unet_2d import UNetConfig
 
 TINY_UNET = UNetConfig(
     block_out_channels=(32, 64),

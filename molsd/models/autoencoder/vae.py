@@ -1,8 +1,8 @@
 import torch
 import torch.nn as nn
 
-from sd.models.autoencoder.decoder import Decoder
-from sd.models.autoencoder.encoder import Encoder
+from molsd.models.autoencoder.decoder import Decoder
+from molsd.models.autoencoder.encoder import Encoder
 
 # SD1.5 latent scaling factor. Everything outside this module works with scaled latents.
 LATENT_SCALE = 0.18215

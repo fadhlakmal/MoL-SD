@@ -1,7 +1,7 @@
 """Checkpoint layout:
 
     <run_dir>/checkpoints/step_0001000/
-        unet.safetensors      # full UNet weights (loadable by sd.models.loader.build_unet)
+        unet.safetensors      # full UNet weights (loadable by molsd.models.loader.build_unet)
         ema.safetensors       # optional
         state.pt              # optimizer, lr scheduler, step, RNG
         config.yaml           # resolved run config (sample.py reads this)

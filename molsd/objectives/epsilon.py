@@ -1,7 +1,7 @@
 import torch
 
-from sd.objectives.base import Objective, TrainingPair, expand_like
-from sd.samplers.ddim import DDIMSampler, scaled_linear_alphas_cumprod
+from molsd.objectives.base import Objective, TrainingPair, expand_like
+from molsd.samplers.ddim import DDIMSampler, scaled_linear_alphas_cumprod
 
 
 class EpsilonObjective(Objective):

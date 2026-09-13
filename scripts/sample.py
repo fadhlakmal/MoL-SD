@@ -21,13 +21,13 @@ from omegaconf import OmegaConf
 from PIL import Image
 from torch.utils.data import DataLoader
 
-from sd.config import Config
-from sd.data.dataset import ConditionalImageDataset, image_transform
-from sd.engine.ema import EMA
-from sd.models.loader import build_clip, build_unet, build_vae
-from sd.objectives import build_objective
-from sd.pipelines.conditional import ConditionalPipeline, to_pil
-from sd.utils.checkpoint import resolve_checkpoint
+from molsd.config import Config
+from molsd.data.dataset import ConditionalImageDataset, image_transform
+from molsd.engine.ema import EMA
+from molsd.models.loader import build_clip, build_unet, build_vae
+from molsd.objectives import build_objective
+from molsd.pipelines.conditional import ConditionalPipeline, to_pil
+from molsd.utils.checkpoint import resolve_checkpoint
 
 
 def parse_args():

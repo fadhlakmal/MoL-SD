@@ -1,7 +1,7 @@
 import torch
 
-from sd.objectives import EpsilonObjective, FlowMatchingObjective
-from sd.samplers.flow_euler import shift_time
+from molsd.objectives import EpsilonObjective, FlowMatchingObjective
+from molsd.samplers.flow_euler import shift_time
 
 
 def test_flow_matching_endpoints_and_target():

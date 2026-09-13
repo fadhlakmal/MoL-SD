@@ -1,5 +1,6 @@
 """Structured config. Unknown keys in YAML raise, and types are checked on merge."""
 
+import os
 from dataclasses import dataclass, field
 
 from omegaconf import MISSING, DictConfig, OmegaConf
@@ -85,10 +86,35 @@ class Config:
     logging: LoggingConfig = field(default_factory=LoggingConfig)
 
 
-def load_config(path: str | None = None, overrides: list[str] | None = None) -> DictConfig:
+def _compose(path: str, root: str, seen: tuple[str, ...] = ()) -> list[DictConfig]:
+    """Expand a YAML file's `defaults:` list into the ordered list of configs to merge.
+
+    Each defaults entry is a path relative to `root` without extension (e.g. `tasks/canny`). Group files
+    are written with their full nesting (`objective: {...}`, `data: {tasks: {...}}`) and may have their
+    own defaults. The file's own keys are merged after its defaults, so they win.
+    """
+    path = os.path.abspath(path)
+    if path in seen:
+        raise ValueError(f"config defaults cycle: {' -> '.join(seen + (path,))}")
+    raw = OmegaConf.load(path)
+    parts = []
+    for entry in raw.pop("defaults", []):
+        group_path = os.path.join(root, f"{entry}.yaml")
+        if not os.path.exists(group_path):
+            raise FileNotFoundError(f"{path}: defaults entry '{entry}' not found at {group_path}")
+        parts += _compose(group_path, root, seen + (path,))
+    return parts + [raw]
+
+
+def load_config(path: str | None = None, overrides: list[str] | None = None, root: str | None = None) -> DictConfig:
+    """Schema defaults <- composed `defaults:` entries <- the file itself <- CLI dotlist overrides.
+
+    `root` is the directory defaults entries are resolved against (default: the config file's directory).
+    """
     cfg = OmegaConf.structured(Config)
     if path is not None:
-        cfg = OmegaConf.merge(cfg, OmegaConf.load(path))
+        for part in _compose(path, root or os.path.dirname(os.path.abspath(path))):
+            cfg = OmegaConf.merge(cfg, part)
     if overrides:
         cfg = OmegaConf.merge(cfg, OmegaConf.from_dotlist(overrides))
     return cfg

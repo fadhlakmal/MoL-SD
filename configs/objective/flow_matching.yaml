@@ -1,0 +1,11 @@
+# SD3 rectified flow. Raise shift (e.g. 3.0) for higher resolutions.
+objective:
+  type: flow_matching
+  timestep_sampling: logit_normal
+  logit_mean: 0.0
+  logit_std: 1.0
+  shift: 1.0
+
+sampling:
+  steps: 28
+  cfg_scale: 5.0

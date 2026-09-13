@@ -5,7 +5,7 @@ import torch
 import torch.nn as nn
 from PIL import Image
 
-from sd.samplers.base import Sampler
+from molsd.samplers.base import Sampler
 
 
 @contextmanager

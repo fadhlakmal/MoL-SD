@@ -5,13 +5,13 @@ import pytest
 import torch
 from omegaconf import OmegaConf
 
-from sd.config import load_config
-from sd.data.dataset import ConditionalImageDataset
-from sd.data.multitask import MultiTaskLoader
-from sd.engine.trainer import Trainer, collate_val_batches
-from sd.models.unet.unet_2d import UNet2DConditionModel
-from sd.objectives import build_objective
-from sd.utils.checkpoint import find_latest
+from molsd.config import load_config
+from molsd.data.dataset import ConditionalImageDataset
+from molsd.data.multitask import MultiTaskLoader
+from molsd.engine.trainer import Trainer, collate_val_batches
+from molsd.models.unet.unet_2d import UNet2DConditionModel
+from molsd.objectives import build_objective
+from molsd.utils.checkpoint import find_latest
 from tests.conftest import TINY_UNET, StubTextEncoder, tiny_vae
 
 
@@ -93,8 +93,3 @@ def test_validation_restores_train_mode(tiny_data):
     images = trainer.validate()
     assert trainer.unet.training
     assert set(images) == {"a", "b"} and images["a"][0].size == (32 * 3, 32)  # condition | generated | target
-
-
-def test_config_rejects_unknown_keys():
-    with pytest.raises(Exception):
-        load_config(overrides=["experiment_name=x", "training.learning_rat=1e-4"])

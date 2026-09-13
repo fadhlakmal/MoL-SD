@@ -1,7 +1,7 @@
 import torch
 
-from sd.objectives.base import Objective, TrainingPair, expand_like
-from sd.samplers.flow_euler import FlowEulerSampler, shift_time
+from molsd.objectives.base import Objective, TrainingPair, expand_like
+from molsd.samplers.flow_euler import FlowEulerSampler, shift_time
 
 
 class FlowMatchingObjective(Objective):
