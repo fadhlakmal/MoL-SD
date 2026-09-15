@@ -16,7 +16,7 @@ weights/
 *.safetensors
 wandb/
 
-data*/
+/data*/
 results/
 
 /.docs
